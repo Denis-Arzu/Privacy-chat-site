@@ -17,6 +17,16 @@
     --background: #0a0a0a;
     --foreground: #ededed;
   }
+
+  @keyframes bounce-once {
+    0%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+  }
+
+  .animate-bounce-once {
+    animation: bounce-once 0.3s ease;
+  }
+
 }
 
 body {
