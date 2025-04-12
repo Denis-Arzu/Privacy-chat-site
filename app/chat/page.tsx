@@ -7,6 +7,7 @@ import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage"
 import { v4 as uuidv4 } from "uuid"
 import { onAuthStateChanged, signOut } from "firebase/auth"
 import dynamic from "next/dynamic"
+import Image from "next/image"
 
 import {
   collection,
@@ -20,6 +21,7 @@ import {
   getDocs,
   updateDoc,
   setDoc,
+  Timestamp,
 } from "firebase/firestore"
 
 const storage = getStorage()
@@ -38,7 +40,8 @@ interface Message {
   fileURL?: string
   sender: string
   uid: string
-  createdAt: any
+  createdAt: Timestamp
+  // createdAt: firebase.firestore.Timestamp
   read: boolean
   type: "text" | "image"
   replyTo?: string
@@ -226,8 +229,16 @@ export default function ChatPage() {
           >
             <div className="text-xs text-gray-300 mb-1 font-semibold">{msg.sender}</div>
             {msg.replyTo && <div className="text-xs italic text-gray-400 mb-1 border-l-2 pl-2 border-green-300">{msg.replyTo}</div>}
-            {msg.type === "text" && <div>{msg.text}</div>}
-            {msg.type === "image" && <img src={msg.fileURL || "/placeholder.svg"} alt="uploaded" className="rounded max-w-[250px] border border-white" />}
+            {msg.type === "image" && (
+              <Image
+                src={msg.fileURL || "/placeholder.svg"}
+                alt="uploaded"
+                width={250}
+                height={250}
+                className="rounded border border-white"
+              />
+            )}
+            {/* {msg.type === "image" && <img src={msg.fileURL || "/placeholder.svg"} alt="uploaded" className="rounded max-w-[250px] border border-white" />} */}
             {msg.uid === user?.uid && msg.read && <div className="text-[10px] text-gray-300 mt-1">✓ Seen</div>}
           </div>
         ))}
