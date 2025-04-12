@@ -11,43 +11,68 @@ import {
   type User,
   type ApplicationVerifier,
 } from "firebase/auth"
-import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore"
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore"
+import toast from "react-hot-toast"
 
-// Extend window to store reCAPTCHA instance
 declare global {
   interface Window {
-    recaptchaVerifier?: RecaptchaVerifier
+    recaptchaVerifier: RecaptchaVerifier
   }
 }
 
 export default function AuthPage() {
+  const router = useRouter()
   const [phone, setPhone] = useState("")
   const [code, setCode] = useState("")
   const [name, setName] = useState("")
-  const [confirmResult, setConfirmResult] = useState<ConfirmationResult | null>(null)
   const [user, setUser] = useState<User | null>(null)
+  const [confirmResult, setConfirmResult] = useState<ConfirmationResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const router = useRouter()
+  const [,setIsClient] = useState(false)
 
   useEffect(() => {
-    // Initialize recaptcha once on client
+    setIsClient(true)
+
+    // Init reCAPTCHA on client
     if (typeof window !== "undefined" && !window.recaptchaVerifier) {
-      window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
-        size: "invisible",
-        callback: (response: string) => {
-          console.log("✅ reCAPTCHA solved:", response)
+      window.recaptchaVerifier = new RecaptchaVerifier(auth,
+        "recaptcha-container",
+        {
+          size: "invisible", // or "normal" for visible box
+          callback: (response: unknown) => {
+            console.log("✅ reCAPTCHA solved:", response)
+          },
+/**
+          * Logs a warning message to the console indicating that reCAPTCHA has expired.
+          * @example
+          * logReCaptchaExpired()
+          * // ⚠️ reCAPTCHA expired. Resetting...
+          * @returns {void} No return value.
+          * @description
+          *   - This function is useful for debugging purposes, informing developers of reCAPTCHA expirations.
+          */
+          expiredCallback: () => {
+            console.warn("⚠️ reCAPTCHA expired. Resetting...")
+          },
         },
-        'expired-callback': () => {
-          console.warn("⚠️ reCAPTCHA expired. Please try again.")
-        },
-      })
+        
+      )
+
+      window.recaptchaVerifier
+        .render()
+        .then((widgetId) => {
+          console.log("reCAPTCHA widget ID:", widgetId)
+        })
+        .catch((err) => {
+          console.error("reCAPTCHA render error:", err)
+        })
     }
   }, [])
 
   const handleSendCode = async () => {
     if (!phone.trim()) {
-      setError("Please enter a valid phone number")
+      setError("Please enter your phone number")
       return
     }
 
@@ -58,10 +83,12 @@ export default function AuthPage() {
       const appVerifier = window.recaptchaVerifier as ApplicationVerifier
       const result = await signInWithPhoneNumber(auth, phone, appVerifier)
       setConfirmResult(result)
-      console.log("✅ Verification code sent")
+      toast.success("Verification code sent!")
+      console.log("✅ Code sent to:", phone)
     } catch (err) {
       console.error("❌ Error sending code:", err)
-      setError("Failed to send verification code. Ensure you're on HTTPS and your domain is whitelisted.")
+      toast.error("Failed to send verification code. Check domain/reCAPTCHA setup.")
+      setError("Failed to send verification code.")
     } finally {
       setLoading(false)
     }
@@ -73,150 +100,108 @@ export default function AuthPage() {
       return
     }
 
-    setLoading(true)
     setError("")
+    setLoading(true)
 
     try {
       const result = await confirmResult?.confirm(code)
-      if (!result) throw new Error("Invalid confirmation result")
+      if (result?.user) {
+        setUser(result.user)
 
-      const signedUser = result.user
-      setUser(signedUser)
-      console.log("✅ User signed in:", signedUser)
+        const userRef = doc(db, "users", result.user.uid)
+        const snapshot = await getDoc(userRef)
 
-      const userRef = doc(db, "users", signedUser.uid)
-      const snapshot = await getDoc(userRef)
+        if (!snapshot.exists()) {
+          await setDoc(userRef, {
+            uid: result.user.uid,
+            phoneNumber: result.user.phoneNumber,
+            name: name || "Anonymous",
+            createdAt: serverTimestamp(),
+          })
+          toast.success("🎉 New user created")
+        } else {
+          toast.success("✅ Welcome back!")
+        }
 
-      if (!snapshot.exists()) {
-        await setDoc(userRef, {
-          uid: signedUser.uid,
-          phoneNumber: signedUser.phoneNumber,
-          name: name || "Anonymous",
-          createdAt: serverTimestamp(),
-        })
-        console.log("📦 User added to Firestore")
-      } else {
-        console.log("ℹ️ User already exists")
+        router.push("/chat")
       }
-
-      router.push("/chat")
     } catch (err) {
-      console.error("❌ Verification failed:", err)
-      setError("Invalid verification code. Please try again.")
+      console.error("❌ Invalid verification code:", err)
+      setError("Invalid code. Please try again.")
+      toast.error("Verification failed. Check the code.")
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white px-4 py-10">
-      <div className="w-full max-w-md bg-gray-800 rounded-2xl shadow-xl p-6 sm:p-8">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold text-green-400">📱 Register to Chat</h1>
-          <p className="text-sm sm:text-base text-gray-400">Secure sign-in with phone number</p>
-        </div>
-
-        {error && (
-          <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-200 text-sm">
-            {error}
-          </div>
-        )}
+    <div className="min-h-screen flex items-center justify-center bg-gray-900 text-white p-6">
+      <div className="w-full max-w-md bg-gray-800 rounded-2xl p-6 sm:p-8 shadow-lg">
+        <h1 className="text-center text-2xl font-bold mb-4 text-green-400">📱 Register to chat</h1>
+        {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
 
         {!user ? (
           !confirmResult ? (
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="phone" className="block text-sm font-medium text-gray-300">
-                  Phone Number
-                </label>
-                <input
-                  id="phone"
-                  type="tel"
-                  placeholder="+1234567890"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  className="w-full p-3 mt-1 border border-gray-600 bg-gray-700 rounded-lg text-white outline-none focus:ring-2 focus:ring-green-500"
-                />
-                <p className="text-xs text-gray-400 mt-1">Include country code (e.g., +1)</p>
-              </div>
-
-              <div>
-                <label htmlFor="name" className="block text-sm font-medium text-gray-300">
-                  Your Name
-                </label>
-                <input
-                  id="name"
-                  type="text"
-                  placeholder="Your Name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full p-3 mt-1 border border-gray-600 bg-gray-700 rounded-lg text-white outline-none focus:ring-2 focus:ring-green-500"
-                />
-              </div>
-
+            <>
+              <input
+                type="tel"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+1234567890"
+                className="w-full bg-gray-700 p-3 rounded-lg mb-4 text-white border border-gray-600"
+              />
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+                className="w-full bg-gray-700 p-3 rounded-lg mb-6 text-white border border-gray-600"
+              />
               <button
                 onClick={handleSendCode}
                 disabled={loading}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition disabled:opacity-50"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg"
               >
                 {loading ? "Sending..." : "Send Verification Code"}
               </button>
-            </div>
+            </>
           ) : (
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="code" className="block text-sm font-medium text-gray-300">
-                  Verification Code
-                </label>
-                <input
-                  id="code"
-                  type="text"
-                  placeholder="Enter verification code"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  className="w-full p-3 mt-1 border border-gray-600 bg-gray-700 rounded-lg text-white outline-none focus:ring-2 focus:ring-green-500"
-                />
-              </div>
-
-              <div className="flex flex-col sm:flex-row gap-3">
+            <>
+              <input
+                type="text"
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="Enter verification code"
+                className="w-full bg-gray-700 p-3 rounded-lg mb-6 text-white border border-gray-600"
+              />
+              <div className="flex gap-3">
                 <button
                   onClick={() => setConfirmResult(null)}
-                  className="sm:flex-1 bg-gray-700 hover:bg-gray-600 text-white font-medium py-3 px-4 rounded-lg transition"
+                  className="flex-1 bg-gray-700 hover:bg-gray-600 text-white py-3 rounded-lg"
                 >
                   Back
                 </button>
                 <button
                   onClick={handleVerifyCode}
                   disabled={loading}
-                  className="sm:flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition disabled:opacity-50"
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg"
                 >
                   {loading ? "Verifying..." : "Verify Code"}
                 </button>
               </div>
-            </div>
+            </>
           )
         ) : (
-          <div className="text-center py-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-green-900/30 rounded-full mb-4">
-              <svg
-                className="w-8 h-8 text-green-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-                xmlns="http://www.w3.org/2000/svg"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-            </div>
-            <h2 className="text-xl font-bold text-green-400 mb-2">Authentication Successful</h2>
-            <p className="text-gray-300">Signed in as {user.phoneNumber}</p>
-            <p className="text-sm text-gray-400 mt-4">Redirecting to chat...</p>
+          <div className="text-center">
+            <p className="text-green-400 text-xl mb-2">Authentication Successful</p>
+            <p className="text-sm text-gray-300 mb-4">Signed in as {user.phoneNumber}</p>
+            <p className="text-sm text-gray-400">Redirecting to chat...</p>
           </div>
         )}
       </div>
 
-      {/* Required for invisible reCAPTCHA */}
-      <div id="recaptcha-container" className="mt-2" />
+      {/* reCAPTCHA */}
+      <div id="recaptcha-container" className="mt-6" />
     </div>
   )
 }
