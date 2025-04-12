@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { auth } from "@/lib/firebase"
 import { db } from "@/lib/firestore"
@@ -13,10 +13,10 @@ import {
 } from "firebase/auth"
 import { doc, setDoc, getDoc, serverTimestamp } from "firebase/firestore"
 
-// Extend window for reCAPTCHA
+// Extend window to store reCAPTCHA instance
 declare global {
   interface Window {
-    recaptchaVerifier: RecaptchaVerifier
+    recaptchaVerifier?: RecaptchaVerifier
   }
 }
 
@@ -26,21 +26,20 @@ export default function AuthPage() {
   const [name, setName] = useState("")
   const [confirmResult, setConfirmResult] = useState<ConfirmationResult | null>(null)
   const [user, setUser] = useState<User | null>(null)
-  const [isClient, setIsClient] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
   const router = useRouter()
 
   useEffect(() => {
-    setIsClient(true)
-  }, [])
-
-  useEffect(() => {
+    // Initialize recaptcha once on client
     if (typeof window !== "undefined" && !window.recaptchaVerifier) {
       window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
         size: "invisible",
-        callback: () => {
-          console.log("reCAPTCHA verified")
+        callback: (response: string) => {
+          console.log("✅ reCAPTCHA solved:", response)
+        },
+        'expired-callback': () => {
+          console.warn("⚠️ reCAPTCHA expired. Please try again.")
         },
       })
     }
@@ -54,15 +53,15 @@ export default function AuthPage() {
 
     setError("")
     setLoading(true)
-    const appVerifier = window.recaptchaVerifier as ApplicationVerifier
 
     try {
+      const appVerifier = window.recaptchaVerifier as ApplicationVerifier
       const result = await signInWithPhoneNumber(auth, phone, appVerifier)
       setConfirmResult(result)
-      setError("")
-    } catch (error) {
-      console.error("Error sending code:", error)
-      setError("Failed to send verification code. Please try again.")
+      console.log("✅ Verification code sent")
+    } catch (err) {
+      console.error("❌ Error sending code:", err)
+      setError("Failed to send verification code. Ensure you're on HTTPS and your domain is whitelisted.")
     } finally {
       setLoading(false)
     }
@@ -74,36 +73,35 @@ export default function AuthPage() {
       return
     }
 
-    setError("")
     setLoading(true)
+    setError("")
 
     try {
       const result = await confirmResult?.confirm(code)
-      if (result?.user) {
-        setUser(result.user)
-        console.log("User signed in:", result.user)
+      if (!result) throw new Error("Invalid confirmation result")
 
-        const userRef = doc(db, "users", result.user.uid)
-        const snapshot = await getDoc(userRef)
+      const signedUser = result.user
+      setUser(signedUser)
+      console.log("✅ User signed in:", signedUser)
 
-        if (!snapshot.exists()) {
-          await setDoc(userRef, {
-            phoneNumber: result.user.phoneNumber,
-            uid: result.user.uid,
-            name: name || "Anonymous",
-            createdAt: serverTimestamp(),
-          })
-          console.log("✅ User added to Firestore")
-        } else {
-          console.log("ℹ️ User already exists in Firestore")
-        }
+      const userRef = doc(db, "users", signedUser.uid)
+      const snapshot = await getDoc(userRef)
 
-        if (isClient) {
-          router.push("/chat")
-        }
+      if (!snapshot.exists()) {
+        await setDoc(userRef, {
+          uid: signedUser.uid,
+          phoneNumber: signedUser.phoneNumber,
+          name: name || "Anonymous",
+          createdAt: serverTimestamp(),
+        })
+        console.log("📦 User added to Firestore")
+      } else {
+        console.log("ℹ️ User already exists")
       }
+
+      router.push("/chat")
     } catch (err) {
-      console.error("❌ Invalid code", err)
+      console.error("❌ Verification failed:", err)
       setError("Invalid verification code. Please try again.")
     } finally {
       setLoading(false)
@@ -111,21 +109,23 @@ export default function AuthPage() {
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 md:p-8 bg-gray-900 text-white">
-      <div className="w-full max-w-md bg-gray-800 rounded-xl shadow-lg p-6 sm:p-8">
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white px-4 py-10">
+      <div className="w-full max-w-md bg-gray-800 rounded-2xl shadow-xl p-6 sm:p-8">
         <div className="text-center mb-8">
-          <h1 className="text-2xl sm:text-3xl font-bold mb-2 text-green-400">📱 Register to chat</h1>
-          <p className="text-gray-400 text-sm sm:text-base">Secure authentication with your phone number</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-green-400">📱 Register to Chat</h1>
+          <p className="text-sm sm:text-base text-gray-400">Secure sign-in with phone number</p>
         </div>
 
         {error && (
-          <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-200 text-sm">{error}</div>
+          <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-lg text-red-200 text-sm">
+            {error}
+          </div>
         )}
 
         {!user ? (
           !confirmResult ? (
             <div className="space-y-4">
-              <div className="space-y-2">
+              <div>
                 <label htmlFor="phone" className="block text-sm font-medium text-gray-300">
                   Phone Number
                 </label>
@@ -135,12 +135,12 @@ export default function AuthPage() {
                   placeholder="+1234567890"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="w-full border border-gray-600 bg-gray-700 p-3 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-white"
+                  className="w-full p-3 mt-1 border border-gray-600 bg-gray-700 rounded-lg text-white outline-none focus:ring-2 focus:ring-green-500"
                 />
-                <p className="text-xs text-gray-400">Enter your phone number with country code</p>
+                <p className="text-xs text-gray-400 mt-1">Include country code (e.g., +1)</p>
               </div>
 
-              <div className="space-y-2">
+              <div>
                 <label htmlFor="name" className="block text-sm font-medium text-gray-300">
                   Your Name
                 </label>
@@ -150,21 +150,21 @@ export default function AuthPage() {
                   placeholder="Your Name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full border border-gray-600 bg-gray-700 p-3 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-white"
+                  className="w-full p-3 mt-1 border border-gray-600 bg-gray-700 rounded-lg text-white outline-none focus:ring-2 focus:ring-green-500"
                 />
               </div>
 
               <button
                 onClick={handleSendCode}
                 disabled={loading}
-                className="w-full bg-blue-600 hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 text-white font-medium py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-3 px-4 rounded-lg transition disabled:opacity-50"
               >
                 {loading ? "Sending..." : "Send Verification Code"}
               </button>
             </div>
           ) : (
             <div className="space-y-4">
-              <div className="space-y-2">
+              <div>
                 <label htmlFor="code" className="block text-sm font-medium text-gray-300">
                   Verification Code
                 </label>
@@ -174,22 +174,21 @@ export default function AuthPage() {
                   placeholder="Enter verification code"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  className="w-full border border-gray-600 bg-gray-700 p-3 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent outline-none text-white"
+                  className="w-full p-3 mt-1 border border-gray-600 bg-gray-700 rounded-lg text-white outline-none focus:ring-2 focus:ring-green-500"
                 />
-                <p className="text-xs text-gray-400">Enter the 6-digit code sent to your phone</p>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
                   onClick={() => setConfirmResult(null)}
-                  className="sm:flex-1 bg-gray-700 hover:bg-gray-600 text-white font-medium py-3 px-4 rounded-lg transition-colors"
+                  className="sm:flex-1 bg-gray-700 hover:bg-gray-600 text-white font-medium py-3 px-4 rounded-lg transition"
                 >
                   Back
                 </button>
                 <button
                   onClick={handleVerifyCode}
                   disabled={loading}
-                  className="sm:flex-1 bg-green-600 hover:bg-green-700 focus:ring-2 focus:ring-green-500 focus:ring-offset-2 focus:ring-offset-gray-800 text-white font-medium py-3 px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="sm:flex-1 bg-green-600 hover:bg-green-700 text-white font-medium py-3 px-4 rounded-lg transition disabled:opacity-50"
                 >
                   {loading ? "Verifying..." : "Verify Code"}
                 </button>
@@ -198,25 +197,26 @@ export default function AuthPage() {
           )
         ) : (
           <div className="text-center py-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-green-900/30 mb-4">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-green-900/30 rounded-full mb-4">
               <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-8 w-8 text-green-400"
+                className="w-8 h-8 text-green-400"
                 fill="none"
-                viewBox="0 0 24 24"
                 stroke="currentColor"
+                viewBox="0 0 24 24"
+                xmlns="http://www.w3.org/2000/svg"
               >
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
             </div>
             <h2 className="text-xl font-bold text-green-400 mb-2">Authentication Successful</h2>
-            <p className="text-gray-300 mb-6">Signed in as {user.phoneNumber}</p>
-            <p className="text-sm text-gray-400">Redirecting to chat...</p>
+            <p className="text-gray-300">Signed in as {user.phoneNumber}</p>
+            <p className="text-sm text-gray-400 mt-4">Redirecting to chat...</p>
           </div>
         )}
       </div>
 
-      <div id="recaptcha-container" className="mt-4" />
+      {/* Required for invisible reCAPTCHA */}
+      <div id="recaptcha-container" className="mt-2" />
     </div>
   )
 }
