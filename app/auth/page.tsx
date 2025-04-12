@@ -31,33 +31,22 @@ export default function AuthPage() {
   const [error, setError] = useState("")
   const [,setIsClient] = useState(false)
 
-  useEffect(() => {
+  
     setIsClient(true)
 
     // Init reCAPTCHA on client
-    if (typeof window !== "undefined" && !window.recaptchaVerifier) {
-      window.recaptchaVerifier = new RecaptchaVerifier(auth,
-        "recaptcha-container",
-        {
-          size: "invisible", // or "normal" for visible box
-          callback: (response: unknown) => {
-            console.log("✅ reCAPTCHA solved:", response)
+    useEffect(() => {
+      if (typeof window !== "undefined" && !window.recaptchaVerifier) {
+        window.recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
+          size: "invisible",
+          callback: (response:unknown) => {
+            console.log("reCAPTCHA solved ✅", response)
           },
-/**
-          * Logs a warning message to the console indicating that reCAPTCHA has expired.
-          * @example
-          * logReCaptchaExpired()
-          * // ⚠️ reCAPTCHA expired. Resetting...
-          * @returns {void} No return value.
-          * @description
-          *   - This function is useful for debugging purposes, informing developers of reCAPTCHA expirations.
-          */
-          expiredCallback: () => {
-            console.warn("⚠️ reCAPTCHA expired. Resetting...")
-          },
-        },
-        
-      )
+          'expired-callback': () => {
+            console.warn("reCAPTCHA expired. Try again.")
+          }
+        })
+    
 
       window.recaptchaVerifier
         .render()
