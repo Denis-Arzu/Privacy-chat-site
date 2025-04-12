@@ -29,10 +29,9 @@ export default function AuthPage() {
   const [confirmResult, setConfirmResult] = useState<ConfirmationResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [,setIsClient] = useState(false)
+  // const [,setIsClient] = useState(false)
 
-  
-    setIsClient(true)
+
 
     // Init reCAPTCHA on client
     useEffect(() => {
