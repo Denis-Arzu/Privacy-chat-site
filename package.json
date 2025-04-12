@@ -13,7 +13,6 @@
     "test:coverage:watch": "jest --coverage --watch",
     "test:coverage:report": "jest --coverage --reporters=default --reporters=jest-junit --reporters=html"
   },
-  
   "dependencies": {
     "date-fns": "^4.1.0",
     "emoji-picker-react": "^4.12.2",
